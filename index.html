@@ -4,177 +4,292 @@
   <meta charset="UTF-8">
   <title>심리 테스트</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    #question-area, #answer-area, #result-area { margin-bottom: 20px; }
-    .answer-btn { padding: 10px 20px; margin-right: 10px; cursor: pointer; }
-    #restart-btn { padding: 10px 20px; cursor: pointer; }
+    /* 기본 스타일 */
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: auto; background-color: #f3f3f3; }
+    /* 질문 스타일 */
+    #question { font-size: 1.2em; margin-bottom: 15px; padding: 10px; background-color: #fff; border-radius: 4px; }
+    /* 답변 버튼 스타일 */
+    #answers button { padding: 10px 20px; margin: 5px; font-size: 1em; border: none; background-color: #4CAF50; color: #fff; border-radius: 4px; cursor: pointer; transition: background-color 0.3s ease; /* 호버 애니메이션 추가 */ }
+    #answers button:hover { background-color: #45a049; }
+    /* 결과 영역 스타일 */
+    #result { margin-top: 20px; padding: 15px; background-color: #e7f3fe; border-left: 6px solid #2196F3; }
+    /* 다시 시작 버튼 스타일 */
+    #restart { margin-top: 20px; padding: 10px 20px; font-size: 1em; border: none; background-color: #f44336; color: #fff; border-radius: 4px; cursor: pointer; display:none; transition: background-color 0.3s ease; /* 호버 애니메이션 추가 */ }
+    #restart:hover { background-color: #da190b; }
   </style>
 </head>
 <body>
-  <h1>심리 테스트</h1>
-  <!-- 질문이 표시될 영역 -->
-  <div id="question-area"></div>
-  <!-- 답변 버튼이 동적으로 생성될 영역 -->
-  <div id="answer-area"></div>
-  <!-- 최종 결과 메시지가 보여질 영역 -->
-  <div id="result-area"></div>
+  <h1>나를 알아보는 심리 테스트 🤔</h1>
   
+  <!-- 테스트 진행 영역 -->
+  <div id="quiz-container">
+    <!-- 질문을 표시할 영역 -->
+    <div id="question">로딩 중...</div>
+    <!-- 답변 버튼들을 표시할 영역 -->
+    <div id="answers"></div>
+  </div>
+
+  <!-- 결과 메시지를 표시할 영역 -->
+  <div id="result" style="display:none;"></div> 
+  
+  <!-- 테스트 재시작 버튼 -->
+  <button id="restart">다시 시작</button>
+
   <script>
     // 전역 변수 선언
-    let questions = [];    // 질문들을 저장할 배열 : { no: 번호, text: 질문내용 }
-    let scoreRules = {};   // 각 질문의 척도에 따른 점수 규칙 저장: scoreRules[질문번호][답변척도] = 점수 변화량
-    let resultRules = [];  // 총 점수에 따른 결과 규칙 배열: { min, max, message }
-
-    let currentQuestionIndex = 0; // 현재 질문 인덱스
+    let quizQuestions = []; // quiz.txt 파일에서 읽어온 질문들을 저장
+    let scoreRules = {};    // score.txt 파일에서 읽어온 점수 규칙 저장 { "질문번호": { "척도값": 점수변화량 } }
+    let resultRules = [];   // score.txt 파일에서 읽어온 결과 규칙 저장 [{min:0, max:10, message:"..."}, ...]
+    let currentQuestionIndex = 0; // 현재 진행 중인 질문 인덱스
     let totalScore = 0;           // 누적 점수
 
     // DOM 요소 가져오기
-    const questionArea = document.getElementById("question-area");
-    const answerArea = document.getElementById("answer-area");
-    const resultArea = document.getElementById("result-area");
+    const questionEl = document.getElementById('question');
+    const answersEl = document.getElementById('answers');
+    const resultEl = document.getElementById('result');
+    const restartBtn = document.getElementById('restart');
+    const quizContainerEl = document.getElementById('quiz-container'); // 테스트 진행 영역 컨테이너
 
-    // 텍스트 파일을 fetch API로 불러오는 함수
-    function fetchText(file) {
-      return fetch(file)
-        .then(response => {
-          if (!response.ok) throw new Error(`파일 불러오기 실패: ${file}`);
-          return response.text();
-        });
+    // 초기화 함수: 파일들을 불러오고 테스트 시작
+    async function initializeQuiz() {
+      questionEl.innerHTML = "테스트 준비 중...";
+      answersEl.innerHTML = "";
+      resultEl.style.display = 'none'; // 결과 영역 숨기기
+      restartBtn.style.display = "none"; // 다시 시작 버튼 숨기기
+      quizContainerEl.style.display = 'block'; // 테스트 진행 영역 보이기
+
+      try {
+        // quiz.txt와 score.txt 파일을 동시에 불러옴
+        const [quizResponse, scoreResponse] = await Promise.all([
+          fetch('quiz.txt'),
+          fetch('score.txt')
+        ]);
+        
+        // 파일 로드 실패 시 에러 처리
+        if (!quizResponse.ok) throw new Error(`quiz.txt 파일 로드 실패: ${quizResponse.status}`);
+        if (!scoreResponse.ok) throw new Error(`score.txt 파일 로드 실패: ${scoreResponse.status}`);
+
+        const quizText = await quizResponse.text();
+        const scoreText = await scoreResponse.text();
+
+        // 파일 내용을 파싱
+        parseQuiz(quizText);
+        parseScore(scoreText);
+
+        // 파싱 후 질문이 없으면 에러 처리
+        if (quizQuestions.length === 0) {
+            throw new Error("quiz.txt 파일에서 유효한 질문을 찾을 수 없습니다.");
+        }
+
+        // 초기 상태로 리셋하고 첫 번째 질문 표시
+        currentQuestionIndex = 0;
+        totalScore = 0;
+        displayQuestion();
+
+      } catch (error) {
+        console.error("테스트 초기화 실패:", error);
+        questionEl.innerHTML = `테스트 로드 중 오류 발생: ${error.message}`;
+        answersEl.innerHTML = ""; // 답변 버튼 영역 비우기
+        resultEl.style.display = 'none'; // 결과 숨김
+        restartBtn.style.display = "none"; // 다시 시작 버튼 숨김
+        quizContainerEl.style.display = 'block'; // 오류 메시지 표시를 위해 보이기
+      }
     }
-    
-    // quiz.txt 파싱 함수 (형식: "Q번호: 질문 내용")
+
+    // quiz.txt 파싱 함수
     function parseQuiz(text) {
-      const lines = text.trim().split('\n');
-      lines.forEach(line => {
-        const trimmedLine = line.trim();
-        const parts = trimmedLine.split(':');
-        if (parts.length >= 2) {
-          const questionIdRaw = parts[0].trim();
-          const questionNo = parseInt(questionIdRaw.replace('Q', ''), 10);
-          const questionText = parts.slice(1).join(':').trim();
-          questions.push({ no: questionNo, text: questionText });
+      quizQuestions = []; // 이전 내용을 초기화
+      const lines = text.split(/\r?\n/); // 줄바꿈 문자로 분리 (\r?는 윈도우/리눅스 줄바꿈 모두 처리)
+      for (let line of lines) {
+        line = line.trim(); // 양쪽 공백 제거
+        if (!line) continue;  // 빈 줄은 건너뛰기
+        
+        // "Q1: 질문 내용" 형태를 가정
+        const parts = line.split(":");
+        if (parts.length < 2) {
+            console.warn("quiz.txt 파싱 오류: ':' 형식이 아닙니다.", line);
+            continue; // 형식이 맞지 않으면 건너뛰기
         }
-      });
-    }
-    
-    // score.txt 파싱 함수 (두 가지 유형: 점수 규칙과 결과 규칙)
-    function parseScore(text) {
-      const lines = text.trim().split('\n');
-      lines.forEach(line => {
-        const trimmedLine = line.trim();
-        // 점수 규칙: "R[질문번호]-[척도]: [점수변화량]"
-        if (trimmedLine.startsWith('R')) { 
-          const colonIndex = trimmedLine.indexOf(':');
-          if (colonIndex === -1) return;
-          const ruleKey = trimmedLine.substring(1, colonIndex).trim(); // 예: "1-3"
-          const scoreValueRaw = trimmedLine.substring(colonIndex + 1).trim(); // 예: "+3"
-          const scoreValue = parseInt(scoreValueRaw, 10);
-          const [qNoStr, scaleStr] = ruleKey.split('-');
-          const qNo = parseInt(qNoStr, 10);
-          const scale = parseInt(scaleStr, 10);
-          if (!scoreRules[qNo]) {
-            scoreRules[qNo] = {};
-          }
-          scoreRules[qNo][scale] = scoreValue;
-        } 
-        // 결과 규칙: "Result[최소점수]-[최대점수 or Max]: 결과 메시지"
-        else if (trimmedLine.startsWith('Result')) {
-          const colonIndex = trimmedLine.indexOf(':');
-          if (colonIndex === -1) return;
-          const rangePart = trimmedLine.substring(6, colonIndex).trim(); // "최소-최대"
-          const message = trimmedLine.substring(colonIndex + 1).trim();
-          const [minStr, maxStr] = rangePart.split('-');
-          const min = parseInt(minStr, 10);
-          let max;
-          if (maxStr.toLowerCase() === 'max') {
-            max = Infinity;
-          } else {
-            max = parseInt(maxStr, 10);
-          }
-          resultRules.push({ min, max, message });
+        const qIdPart = parts[0].trim();   // 예: "Q1"
+        const questionText = parts.slice(1).join(":").trim(); // ':'가 여러 개일 경우 고려
+
+        // "Q" 문자와 숫자 추출 (예: "Q1" -> 1)
+        const qNumber = qIdPart.replace(/[^0-9]/g, ''); // 숫자 이외 문자 제거
+        if (!qNumber) {
+             console.warn("quiz.txt 파싱 오류: 질문 번호를 찾을 수 없습니다.", line);
+             continue; // 질문 번호가 없으면 건너뛰기
         }
-      });
-    }
-    
-    // 현재 질문과 척도 버튼 생성 함수
-    function displayQuestion() {
-      // 기존 내용 초기화
-      questionArea.innerHTML = "";
-      answerArea.innerHTML = "";
-      resultArea.innerHTML = "";
-      
-      if (currentQuestionIndex < questions.length) {
-        const currentQuestion = questions[currentQuestionIndex];
-        questionArea.textContent = currentQuestion.text;
-  
-        // 1~5 척도 버튼 생성
-        for (let rating = 1; rating <= 5; rating++) {
-          const btn = document.createElement('button');
-          btn.textContent = rating;
-          btn.className = "answer-btn";
-          btn.addEventListener('click', () => handleAnswer(currentQuestion.no, rating));
-          answerArea.appendChild(btn);
-        }
-      } else {
-        // 모든 질문이 끝난 경우 결과 표시
-        showResult();
-      }
-    }
-    
-    // 답변 처리 함수: 선택한 점수를 누적한 후 다음 질문으로 이동
-    function handleAnswer(questionNo, chosenScale) {
-      const rule = scoreRules[questionNo] ? scoreRules[questionNo][chosenScale] : 0;
-      totalScore += rule;
-      currentQuestionIndex++;
-      displayQuestion();
-    }
-    
-    // 총 점수에 따라 결과 메시지 표시 함수
-    function showResult() {
-      questionArea.innerHTML = "";
-      answerArea.innerHTML = "";
-      let finalMessage = "결과를 판단할 수 없습니다.";
-      // 결과 규칙을 순회하여 해당 범위와 일치하는 메시지 결정
-      for (let i = 0; i < resultRules.length; i++) {
-        const rule = resultRules[i];
-        if (totalScore >= rule.min && totalScore <= rule.max) {
-          finalMessage = rule.message;
-          break;
-        }
-      }
-      resultArea.textContent = `당신의 총 점수: ${totalScore}. ${finalMessage}`;
-      
-      // "다시 시작하기" 버튼 생성
-      const restartBtn = document.createElement('button');
-      restartBtn.id = 'restart-btn';
-      restartBtn.textContent = "다시 시작하기";
-      restartBtn.addEventListener('click', restartQuiz);
-      resultArea.appendChild(document.createElement('br'));
-      resultArea.appendChild(restartBtn);
-    }
-    
-    // 퀴즈를 다시 초기화하는 함수
-    function restartQuiz() {
-      currentQuestionIndex = 0;
-      totalScore = 0;
-      displayQuestion();
-    }
-    
-    // 초기화 함수: quiz.txt와 score.txt 파일을 불러와 파싱 후 퀴즈 시작
-    function initQuiz() {
-      Promise.all([fetchText('quiz.txt'), fetchText('score.txt')])
-        .then(([quizData, scoreData]) => {
-          parseQuiz(quizData);
-          parseScore(scoreData);
-          displayQuestion();
-        })
-        .catch(err => {
-          questionArea.textContent = "데이터 로딩중 에러 발생: " + err.message;
+
+        quizQuestions.push({
+          number: qNumber, // 질문 번호 (문자열)
+          text: questionText // 질문 내용
         });
+      }
+      console.log("quizQuestions 로드 완료:", quizQuestions); // 파싱 결과 확인
     }
-    
-    // 페이지 로딩 후 퀴즈 시작
-    window.addEventListener('load', initQuiz);
+
+    // score.txt 파싱 함수
+    function parseScore(text) {
+      scoreRules = {};
+      resultRules = [];
+      const lines = text.split(/\r?\n/);
+      for (let line of lines) {
+        // 주석("//") 제거 후 공백 제거
+        if (line.indexOf("//") !== -1) {
+          line = line.split("//")[0];
+        }
+        line = line.trim();
+        if (!line) continue; // 빈 줄 건너뛰기
+
+        // 점수 규칙 (R타입) 처리 (예: R1-3: +3)
+        if (line.startsWith("R")) {
+          const [rulePart, valuePart] = line.split(":");
+          if (!valuePart) {
+              console.warn("score.txt 파싱 오류: R 규칙에 점수 변화량이 없습니다.", line);
+              continue;
+          }
+          const ruleId = rulePart.trim(); // 예: "R1-3"
+          const scoreChange = parseInt(valuePart.trim()); // 예: 3 또는 -5 (정수로 변환)
+          
+          // 정규식으로 질문번호와 척도값(1~5) 추출: R(질문번호)-(1~5) 형식 확인
+          const regex = /^R(\d+)-([1-5])$/;
+          const match = ruleId.match(regex);
+
+          if (match) {
+            const qNumber = match[1]; // 예: "1" (문자열)
+            const answerValue = match[2]; // 예: "3" (문자열 1~5)
+            
+            // scoreRules 객체에 { "질문번호": { "척도값": 점수 } } 형태로 저장
+            if (!scoreRules[qNumber]) {
+              scoreRules[qNumber] = {}; // 해당 질문 번호의 객체가 없으면 생성
+            }
+            scoreRules[qNumber][answerValue] = scoreChange; // 예: scoreRules["1"]["3"] = 3
+          } else {
+             console.warn("score.txt 파싱 오류: 유효하지 않은 R 규칙 형식입니다.", line);
+          }
+        }
+        // 결과 규칙 (Result타입) 처리 (예: Result0-10: 메시지)
+        else if (line.startsWith("Result")) {
+          const [rangePart, messagePart] = line.split(":");
+          if (!messagePart) {
+              console.warn("score.txt 파싱 오류: Result 규칙에 결과 메시지가 없습니다.", line);
+              continue;
+          }
+          const range = rangePart.trim().substring(6); // "Result" 다음 부분 추출 (예: "0-10" 또는 "21-Max")
+          const message = messagePart.trim();
+          
+          let min = 0, max = Infinity; // 최소값 기본 0, 최대값 기본 무한대
+          
+          if (range.indexOf("-") !== -1) {
+            const rangeParts = range.split("-");
+            min = parseInt(rangeParts[0].trim()); // 최소 점수 (정수)
+            // 최대 점수가 "Max"인지 확인 후 처리
+            const maxPart = rangeParts[1].trim().toLowerCase();
+            max = (maxPart === "max") ? Infinity : parseInt(maxPart);
+            
+            // 숫자로 변환 실패 시 에러 체크
+            if (isNaN(min) || (maxPart !== "max" && isNaN(max))) {
+                 console.warn("score.txt 파싱 오류: 유효하지 않은 Result 점수 범위 형식입니다.", line);
+                 continue; // 유효하지 않으면 건너뛰기
+            }
+          } else {
+               console.warn("score.txt 파싱 오류: 유효하지 않은 Result 범위 형식입니다 ('-' 없음).", line);
+               continue;
+          }
+          
+          resultRules.push({ min, max, message }); // 결과 규칙 배열에 추가
+        } else {
+             console.warn("score.txt 파싱 오류: 알 수 없는 형식의 줄입니다.", line);
+        }
+      }
+      console.log("scoreRules 로드 완료:", scoreRules); // 파싱 결과 확인
+      console.log("resultRules 로드 완료:", resultRules); // 파싱 결과 확인
+    }
+
+    // 현재 질문과 1-5 척도 버튼들을 동적으로 표시하는 함수
+    function displayQuestion() {
+      // 현재 질문 인덱스가 전체 질문 개수와 같거나 크면 테스트 종료
+      if (currentQuestionIndex >= quizQuestions.length) {
+        displayResult(); // 결과 표시 함수 호출
+        return;
+      }
+      
+      // 질문 영역과 답변 영역을 비우고 채우기
+      answersEl.innerHTML = ""; // 이전 답변 버튼 제거
+      resultEl.style.display = 'none'; // 결과 영역 다시 숨기기
+
+      const currentQuestion = quizQuestions[currentQuestionIndex]; // 현재 질문 가져오기
+      // 질문 번호와 내용 표시
+      questionEl.innerHTML = `<p><strong>Q${currentQuestion.number}:</strong> ${currentQuestion.text}</p>`;
+
+      // 1부터 5까지의 버튼 생성 및 이벤트 리스너 추가
+      for (let i = 1; i <= 5; i++) {
+        const btn = document.createElement("button"); // 버튼 요소 생성
+        btn.textContent = i; // 버튼 텍스트를 1, 2, 3, 4, 5로 설정
+        // 버튼 클릭 시 processAnswer 함수 호출
+        // 현재 질문 번호(currentQuestion.number)와 선택된 값(i)을 인자로 넘김
+        btn.addEventListener("click", function() {
+          processAnswer(currentQuestion.number, i);
+        });
+        answersEl.appendChild(btn); // 답변 영역에 버튼 추가
+      }
+    }
+
+    // 사용자의 응답을 처리하는 함수: 선택된 값에 따라 점수 계산 및 다음 질문 표시
+    function processAnswer(qNumber, answerValue) {
+      // 현재 질문 번호와 선택된 값(1-5)에 해당하는 점수 규칙 찾기
+      // scoreRules 객체는 { "질문번호": { "척도값": 점수 } } 형태
+      const rulesForQuestion = scoreRules[qNumber]; // 예: scoreRules["1"]
+      const scoreChange = rulesForQuestion ? rulesForQuestion[answerValue] : undefined; // 예: scoreRules["1"]["3"] 의 값
+
+      // 해당 규칙이 존재하고 점수 변화량이 숫자인지 확인
+      if (scoreChange !== undefined && typeof scoreChange === 'number') {
+        totalScore += scoreChange; // 총점에 점수 변화량 더하기
+        console.log(`Q${qNumber}에 ${answerValue} 선택, 점수 ${scoreChange} 추가. 현재 총점: ${totalScore}`); // 점수 변화 확인 로그
+      } else {
+        console.warn(`점수 규칙을 찾을 수 없거나 유효하지 않습니다: Q${qNumber}의 선택 ${answerValue}. scoreRules:`, scoreRules); // 규칙 없을 때 경고
+      }
+      
+      currentQuestionIndex++; // 다음 질문으로 이동 (인덱스 증가)
+      displayQuestion(); // 다음 질문 표시 (또는 테스트 종료)
+    }
+
+    // 최종 점수에 따른 결과 메시지를 표시하는 함수
+    function displayResult() {
+      let message = "결과를 찾을 수 없습니다. 점수 범위 규칙을 확인하세요."; // 기본 메시지 (score.txt 문제 가능성)
+      
+      // 등록된 resultRules 배열을 순회하여, totalScore가 범위에 부합하는 메시지를 찾음
+      // resultRules 배열은 [{min, max, message}, ...] 형태
+      for (let rule of resultRules) {
+        // 총점(totalScore)이 현재 규칙의 최소(min)와 최대(max) 점수 범위 안에 있는지 확인
+        // 최소값 이상 (>= rule.min) 이고, 최대값 이하 (<= rule.max) 일 때 해당 범위
+        if (totalScore >= rule.min && totalScore <= rule.max) {
+          message = rule.message; // 해당 범위의 결과 메시지 선택
+          break; // 메시지를 찾았으면 반복 중단
+        }
+      }
+      
+      // 테스트 진행 영역 숨기고 결과 영역 보여주기
+      quizContainerEl.style.display = 'none'; // 질문/답변 영역 숨김
+      resultEl.style.display = 'block'; // 결과 영역 보이기
+
+      // 결과 화면에 총점과 결과 메시지 표시
+      resultEl.innerHTML = `<h2>🎉 테스트 결과! 🎉</h2><p>당신의 총점: <strong>${totalScore}</strong></p><p>${message}</p>`;
+      
+      restartBtn.style.display = "inline-block"; // 다시 시작 버튼 보이기
+    }
+
+    // "다시 시작" 버튼 클릭 시 초기화 함수 호출하여 테스트를 재시작
+    restartBtn.addEventListener("click", initializeQuiz);
+
+    // 페이지 로드 완료 시 초기화 함수 실행 (테스트 시작)
+    window.addEventListener("load", initializeQuiz);
+
+    // 혹시 페이지 로드 이벤트가 이미 발생했을 경우 (SPA 등) 바로 초기화 실행
+    if (document.readyState === 'complete') {
+        initializeQuiz();
+    }
+
   </script>
 </body>
 </html>
