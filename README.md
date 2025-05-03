@@ -1,4 +1,3 @@
------ File: index.html -----
 ```html
 <!DOCTYPE html>
 <html lang="ko">
@@ -6,278 +5,222 @@
   <meta charset="UTF-8">
   <title>심리 테스트</title>
   <style>
-    /* 기본 스타일 설정 */
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      max-width: 600px;
-      margin: auto;
-      background-color: #f3f3f3;
-    }
-    #question {
-      font-size: 1.2em;
-      margin-bottom: 15px;
-      padding: 10px;
-      background-color: #fff;
-      border-radius: 4px;
-    }
-    #answers button {
-      padding: 10px 20px;
-      margin: 5px;
-      font-size: 1em;
-      border: none;
-      background-color: #4CAF50;
-      color: #fff;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    #answers button:hover {
-      background-color: #45a049;
-    }
-    #result {
-      margin-top: 20px;
-      padding: 15px;
-      background-color: #e7f3fe;
-      border-left: 6px solid #2196F3;
-    }
-    #restart {
-      margin-top: 20px;
-      padding: 10px 20px;
-      font-size: 1em;
-      border: none;
-      background-color: #f44336;
-      color: #fff;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    #restart:hover {
-      background-color: #da190b;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #question-area, #answer-area, #result-area { margin-bottom: 20px; }
+    .answer-btn { padding: 10px 20px; margin-right: 10px; cursor: pointer; }
+    #restart-btn { padding: 10px 20px; cursor: pointer; }
   </style>
 </head>
 <body>
   <h1>심리 테스트</h1>
-  <!-- 질문을 표시할 영역 -->
-  <div id="question">로딩 중...</div>
-  <!-- 답변 버튼들을 표시할 영역 -->
-  <div id="answers"></div>
-  <!-- 결과 메시지를 표시할 영역 -->
-  <div id="result"></div>
-  <!-- 테스트 재시작 버튼 -->
-  <button id="restart" style="display:none;">다시 시작</button>
-
+  <!-- 질문이 표시될 영역 -->
+  <div id="question-area"></div>
+  <!-- 답변 버튼이 동적으로 생성될 영역 -->
+  <div id="answer-area"></div>
+  <!-- 최종 결과 메시지가 보여질 영역 -->
+  <div id="result-area"></div>
+  
   <script>
     // 전역 변수 선언
-    let quizQuestions = []; // quiz.txt 파일에서 읽어온 질문들을 저장
-    let scoreRules = {};    // score.txt 파일에서 읽어온 점수 규칙 저장 (예: { "1": { "1": +1, ... } })
-    let resultRules = [];   // score.txt 파일에서 읽어온 결과 규칙 저장 (예: [{min:0, max:10, message:"..."}, ...])
-    let currentQuestionIndex = 0; // 현재 진행 중인 질문 인덱스
+    let questions = [];    // 질문들을 저장할 배열 : { no: 번호, text: 질문내용 }
+    let scoreRules = {};   // 각 질문의 척도에 따른 점수 규칙 저장: scoreRules[질문번호][답변척도] = 점수 변화량
+    let resultRules = [];  // 총 점수에 따른 결과 규칙 배열: { min, max, message }
+
+    let currentQuestionIndex = 0; // 현재 질문 인덱스
     let totalScore = 0;           // 누적 점수
 
-    // 초기화 함수: quiz.txt와 score.txt 파일을 fetch API를 이용해 비동기적으로 불러옴
-    async function initializeQuiz() {
-      try {
-        const [quizResponse, scoreResponse] = await Promise.all([
-          fetch('quiz.txt'),
-          fetch('score.txt')
-        ]);
-        const quizText = await quizResponse.text();
-        const scoreText = await scoreResponse.text();
+    // DOM 요소 가져오기
+    const questionArea = document.getElementById("question-area");
+    const answerArea = document.getElementById("answer-area");
+    const resultArea = document.getElementById("result-area");
 
-        // 파일의 내용을 파싱
-        parseQuiz(quizText);
-        parseScore(scoreText);
-
-        // 초기 상태로 리셋
-        currentQuestionIndex = 0;
-        totalScore = 0;
-        document.getElementById('result').innerHTML = "";
-        document.getElementById('restart').style.display = "none";
-
-        // 첫 번째 질문 표시
-        displayQuestion();
-      } catch (error) {
-        console.error("파일 로드에 실패했습니다.", error);
-        document.getElementById('question').innerHTML = "파일 로드 실패. 콘솔을 확인하세요.";
-      }
+    // 텍스트 파일을 fetch API로 불러오는 함수
+    function fetchText(file) {
+      return fetch(file)
+        .then(response => {
+          if (!response.ok) throw new Error(`파일 불러오기 실패: ${file}`);
+          return response.text();
+        });
     }
-
-    // quiz.txt 파싱 함수
+    
+    // quiz.txt 파싱 함수 (형식: "Q번호: 질문 내용")
     function parseQuiz(text) {
-      quizQuestions = []; // 이전 내용을 초기화
-      const lines = text.split(/\r?\n/);
-      for (let line of lines) {
-        line = line.trim();
-        if (!line) continue;  // 빈 줄은 건너뛰기
-        // "Q1:" 형태로 되어 있으므로 ':'를 기준으로 분리
-        const parts = line.split(":");
-        if (parts.length < 2) continue;
-        const qIdPart = parts[0].trim();   // 예: "Q1"
-        const questionText = parts.slice(1).join(":").trim();
-        // "Q1"에서 숫자만 추출
-        const qNumber = qIdPart.replace(/[^0-9]/g, '');
-        quizQuestions.push({
-          number: qNumber,
-          text: questionText
-        });
-      }
+      const lines = text.trim().split('\n');
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        const parts = trimmedLine.split(':');
+        if (parts.length >= 2) {
+          const questionIdRaw = parts[0].trim();
+          const questionNo = parseInt(questionIdRaw.replace('Q', ''), 10);
+          const questionText = parts.slice(1).join(':').trim();
+          questions.push({ no: questionNo, text: questionText });
+        }
+      });
     }
-
-    // score.txt 파싱 함수
+    
+    // score.txt 파싱 함수 (두 가지 유형: 점수 규칙과 결과 규칙)
     function parseScore(text) {
-      scoreRules = {};
-      resultRules = [];
-      const lines = text.split(/\r?\n/);
-      for (let line of lines) {
-        // 주석("//") 제거
-        if (line.indexOf("//") !== -1) {
-          line = line.split("//")[0];
-        }
-        line = line.trim();
-        if (!line) continue; // 빈 줄 건너뛰기
-
-        // 점수 규칙 (R타입) 처리
-        if (line.startsWith("R")) {
-          // 예: R1-3: +3
-          const [rulePart, valuePart] = line.split(":");
-          if (!valuePart) continue;
-          const ruleId = rulePart.trim();
-          const scoreChange = parseInt(valuePart.trim());
-          // 정규식으로 질문번호와 척도값 추출: R(질문번호)-(1~5)
-          const regex = /^R(\d+)-([1-5])$/;
-          const match = ruleId.match(regex);
-          if (match) {
-            const qNumber = match[1];
-            const answerValue = match[2];
-            if (!scoreRules[qNumber]) {
-              scoreRules[qNumber] = {};
-            }
-            scoreRules[qNumber][answerValue] = scoreChange;
+      const lines = text.trim().split('\n');
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        // 점수 규칙: "R[질문번호]-[척도]: [점수변화량]"
+        if (trimmedLine.startsWith('R')) { 
+          const colonIndex = trimmedLine.indexOf(':');
+          if (colonIndex === -1) return;
+          const ruleKey = trimmedLine.substring(1, colonIndex).trim(); // 예: "1-3"
+          const scoreValueRaw = trimmedLine.substring(colonIndex + 1).trim(); // 예: "+3"
+          const scoreValue = parseInt(scoreValueRaw, 10);
+          const [qNoStr, scaleStr] = ruleKey.split('-');
+          const qNo = parseInt(qNoStr, 10);
+          const scale = parseInt(scaleStr, 10);
+          if (!scoreRules[qNo]) {
+            scoreRules[qNo] = {};
           }
-        }
-        // 결과 규칙 (Result타입) 처리
-        else if (line.startsWith("Result")) {
-          // 예: Result0-10: 메시지
-          const [rangePart, messagePart] = line.split(":");
-          if (!messagePart) continue;
-          const range = rangePart.trim().substring(6); // "0-10" 또는 "21-Max"
-          const message = messagePart.trim();
-          let min = 0, max = Infinity;
-          if (range.indexOf("-") !== -1) {
-            const rangeParts = range.split("-");
-            min = parseInt(rangeParts[0].trim());
-            max = (rangeParts[1].trim().toLowerCase() === "max") ? Infinity : parseInt(rangeParts[1].trim());
+          scoreRules[qNo][scale] = scoreValue;
+        } 
+        // 결과 규칙: "Result[최소점수]-[최대점수 or Max]: 결과 메시지"
+        else if (trimmedLine.startsWith('Result')) {
+          const colonIndex = trimmedLine.indexOf(':');
+          if (colonIndex === -1) return;
+          const rangePart = trimmedLine.substring(6, colonIndex).trim(); // "최소-최대"
+          const message = trimmedLine.substring(colonIndex + 1).trim();
+          const [minStr, maxStr] = rangePart.split('-');
+          const min = parseInt(minStr, 10);
+          let max;
+          if (maxStr.toLowerCase() === 'max') {
+            max = Infinity;
+          } else {
+            max = parseInt(maxStr, 10);
           }
-          resultRules.push({min, max, message});
+          resultRules.push({ min, max, message });
         }
-      }
+      });
     }
-
-    // 현재 질문과 1-5 척도 버튼들을 동적으로 표시하는 함수
+    
+    // 현재 질문과 척도 버튼 생성 함수
     function displayQuestion() {
-      if (currentQuestionIndex >= quizQuestions.length) {
-        // 모든 질문이 끝나면 결과 표시 함수 호출
-        displayResult();
-        return;
-      }
-      // 이전 답변 영역 초기화
-      document.getElementById('answers').innerHTML = "";
-      document.getElementById('question').innerHTML = "";
-
-      const currentQuestion = quizQuestions[currentQuestionIndex];
-      document.getElementById('question').innerHTML = "Q" + currentQuestion.number + ": " + currentQuestion.text;
-
-      // 1부터 5까지의 버튼 생성
-      for (let i = 1; i <= 5; i++) {
-        const btn = document.createElement("button");
-        btn.textContent = i;
-        // 각 버튼 클릭 시 processAnswer 함수 호출하여 점수 반영
-        btn.addEventListener("click", function() {
-          processAnswer(currentQuestion.number, i);
-        });
-        document.getElementById("answers").appendChild(btn);
+      // 기존 내용 초기화
+      questionArea.innerHTML = "";
+      answerArea.innerHTML = "";
+      resultArea.innerHTML = "";
+      
+      if (currentQuestionIndex < questions.length) {
+        const currentQuestion = questions[currentQuestionIndex];
+        questionArea.textContent = currentQuestion.text;
+  
+        // 1~5 척도 버튼 생성
+        for (let rating = 1; rating <= 5; rating++) {
+          const btn = document.createElement('button');
+          btn.textContent = rating;
+          btn.className = "answer-btn";
+          btn.addEventListener('click', () => handleAnswer(currentQuestion.no, rating));
+          answerArea.appendChild(btn);
+        }
+      } else {
+        // 모든 질문이 끝난 경우 결과 표시
+        showResult();
       }
     }
-
-    // 사용자의 응답을 처리하는 함수: 선택된 값에 따라 점수를 추가하고 다음 질문 표시
-    function processAnswer(qNumber, answerValue) {
-      const rulesForQuestion = scoreRules[qNumber];
-      if (rulesForQuestion && rulesForQuestion[answerValue] !== undefined) {
-        totalScore += rulesForQuestion[answerValue];
-      } else {
-        console.warn("해당 규칙이 없습니다: Q" + qNumber + "의 선택: " + answerValue);
-      }
+    
+    // 답변 처리 함수: 선택한 점수를 누적한 후 다음 질문으로 이동
+    function handleAnswer(questionNo, chosenScale) {
+      const rule = scoreRules[questionNo] ? scoreRules[questionNo][chosenScale] : 0;
+      totalScore += rule;
       currentQuestionIndex++;
       displayQuestion();
     }
-
-    // 최종 점수에 따른 결과 메시지를 표시하는 함수
-    function displayResult() {
-      let message = "결과를 찾을 수 없습니다.";
-      // 등록된 resultRules 배열을 순회하여, totalScore가 범위에 부합하는 메시지를 찾음
-      for (let rule of resultRules) {
+    
+    // 총 점수에 따라 결과 메시지 표시 함수
+    function showResult() {
+      questionArea.innerHTML = "";
+      answerArea.innerHTML = "";
+      let finalMessage = "결과를 판단할 수 없습니다.";
+      // 결과 규칙을 순회하여 해당 범위와 일치하는 메시지 결정
+      for (let i = 0; i < resultRules.length; i++) {
+        const rule = resultRules[i];
         if (totalScore >= rule.min && totalScore <= rule.max) {
-          message = rule.message;
+          finalMessage = rule.message;
           break;
         }
       }
-      document.getElementById('question').innerHTML = "당신의 총점: " + totalScore;
-      document.getElementById('answers').innerHTML = "";
-      document.getElementById('result').innerHTML = message;
-      document.getElementById('restart').style.display = "inline-block";
+      resultArea.textContent = `당신의 총 점수: ${totalScore}. ${finalMessage}`;
+      
+      // "다시 시작하기" 버튼 생성
+      const restartBtn = document.createElement('button');
+      restartBtn.id = 'restart-btn';
+      restartBtn.textContent = "다시 시작하기";
+      restartBtn.addEventListener('click', restartQuiz);
+      resultArea.appendChild(document.createElement('br'));
+      resultArea.appendChild(restartBtn);
     }
-
-    // "다시 시작" 버튼 클릭 시 초기화 함수 호출하여 테스트를 재시작
-    document.getElementById('restart').addEventListener("click", initializeQuiz);
-
-    // 페이지 로드 시 초기화 함수 실행
-    window.addEventListener("load", initializeQuiz);
+    
+    // 퀴즈를 다시 초기화하는 함수
+    function restartQuiz() {
+      currentQuestionIndex = 0;
+      totalScore = 0;
+      displayQuestion();
+    }
+    
+    // 초기화 함수: quiz.txt와 score.txt 파일을 불러와 파싱 후 퀴즈 시작
+    function initQuiz() {
+      Promise.all([fetchText('quiz.txt'), fetchText('score.txt')])
+        .then(([quizData, scoreData]) => {
+          parseQuiz(quizData);
+          parseScore(scoreData);
+          displayQuestion();
+        })
+        .catch(err => {
+          questionArea.textContent = "데이터 로딩중 에러 발생: " + err.message;
+        });
+    }
+    
+    // 페이지 로딩 후 퀴즈 시작
+    window.addEventListener('load', initQuiz);
   </script>
 </body>
 </html>
 ```
 
------ File: quiz.txt -----
-```plaintext
-Q1: 나는 새로운 환경에 쉽게 적응하는 편이다.
-Q2: 계획을 세우고 실행하는 것을 좋아한다.
-Q3: 여러 사람과 함께 있을 때 에너지를 얻는다.
+```txt
+Q1: 새로운 도전은 나에게 즐거움이다.
+Q2: 계획 없이 떠나는 여행을 선호한다.
+Q3: 사람들과 함께 시간을 보내는 것을 좋아한다.
 ```
 
------ File: score.txt -----
-```plaintext
-R1-1: +1 // Q1에 1점 선택 시 +1점
+```txt
+R1-1: +1
 R1-2: +2
 R1-3: +3
 R1-4: +4
-R1-5: +5 // Q1에 5점 선택 시 +5점
+R1-5: +5
 
-R2-1: +5 // Q2에 1점 선택 시 +5점 (계획과 반대되는 성향, 점수 높게)
+R2-1: +5
 R2-2: +4
 R2-3: +3
 R2-4: +2
-R2-5: +1 // Q2에 5점 선택 시 +1점 (계획적인 성향, 점수 낮게)
+R2-5: +1
 
-R3-1: +1 // Q3에 1점 선택 시 +1점 (혼자 있는 것 선호)
+R3-1: +1
 R3-2: +2
 R3-3: +3
 R3-4: +4
-R3-5: +5 // Q3에 5점 선택 시 +5점 (함께 있는 것 선호, 점수 낮게)
+R3-5: +5
 
-Result0-10: 당신은 안정적인 성향입니다.
-Result11-20: 당신은 유연한 성향입니다.
-Result21-Max: 당신은 변화를 즐기는 성향입니다!
+Result3-9: 당신은 안정적인 성향입니다.
+Result10-15: 당신은 유연한 성향입니다.
+Result16-Max: 당신은 활동적인 성향입니다.
 ```
 
-────────────────────────────────────────────
-[프로그램 동작 원리 - 단계별 설명]
+─────────────────────────────  
+설명:
 
-1. 페이지가 로드되면 window의 load 이벤트가 발생하여 initializeQuiz() 함수가 호출됩니다.
-2. initializeQuiz() 함수에서는 fetch API를 사용하여 quiz.txt와 score.txt 파일을 동시에 불러옵니다.
-3. 불러온 파일의 텍스트를 각각 parseQuiz()와 parseScore() 함수로 파싱하여 질문 배열(quizQuestions), 점수 규칙(scoreRules), 결과 규칙(resultRules)을 생성합니다.
-4. 첫 번째 질문이 displayQuestion() 함수를 통해 화면에 표시되며, 질문 영역(#question)과 1부터 5까지의 선택지 버튼을 동적으로 생성합니다.
-5. 사용자가 각 버튼을 클릭하면 processAnswer() 함수가 호출되어, 해당 질문과 선택한 값에 맞는 점수 변화량(scoreRules에서)을 totalScore에 반영한 후, 다음 질문을 표시합니다.
-6. 모든 질문이 완료되면 displayResult() 함수가 호출되어, 누적된 totalScore에 따라 resultRules 배열에서 해당 범위의 결과 메시지를 찾고, 이를 화면에 출력합니다.
-7. 또한, "다시 시작" 버튼을 클릭하면 initializeQuiz() 함수가 재호출되어 테스트가 처음부터 다시 진행됩니다.
+1. HTML 뼈대에는 질문, 답변, 결과 표시를 위한 세 개의 영역(div)이 있습니다. 각각 id가 "question-area", "answer-area", "result-area"로 지정되었습니다.
+2. 자바스크립트는 페이지 하단의 <script> 태그 내부에 작성되었으며, fetch API를 사용해 외부 파일 quiz.txt와 score.txt를 불러옵니다.
+3. parseQuiz 함수는 quiz.txt의 각 줄("Q번호: 질문 내용")을 읽어 파싱한 후 questions 배열에 추가합니다.
+4. parseScore 함수는 score.txt의 각 줄을 읽어 점수 규칙과 결과 규칙을 분리하여 각각 scoreRules 객체와 resultRules 배열에 저장합니다.
+5. displayQuestion 함수는 현재 질문을 화면에 표시하고 1부터 5까지의 답변 버튼을 동적으로 생성합니다.
+6. 사용자가 버튼을 클릭하면 handleAnswer 함수가 호출되어 해당 답변에 해당하는 점수를 scoreRules에서 찾아 누적 점수를 업데이트하고, 다음 질문을 불러옵니다.
+7. 모든 질문에 답하면 showResult 함수가 실행되어 totalScore 값을 기준으로 resultRules 내의 범위와 일치하는 결과 메시지를 출력합니다. 또한 "다시 시작하기" 버튼을 제공하여 퀴즈를 새로 시작할 수 있습니다.
+8. initQuiz 함수는 페이지 로딩 시 실행되어 파일들을 불러오고 파싱한 후 첫 질문을 표시합니다.
 
-이로써 Github Pages에서 작동하는 간단한 심리 테스트 웹사이트의 구현이 완료됩니다.
+이 코드는 Github Pages에서 작동하는 간단한 심리 테스트 웹사이트를 구현하며, quiz.txt와 score.txt 파일을 통해 동적으로 테스트 내용과 결과를 설정합니다.
