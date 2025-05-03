@@ -192,6 +192,12 @@
                  console.warn("score.txt 파싱 오류: 유효하지 않은 Result 점수 범위 형식입니다.", line);
                  continue; // 유효하지 않으면 건너뛰기
             }
+             // 최소 점수가 최대 점수보다 큰 경우도 유효하지 않다고 판단
+            if (max !== Infinity && min > max) {
+                 console.warn("score.txt 파싱 오류: 결과 범위의 최소값이 최대값보다 큽니다.", line);
+                 continue;
+            }
+
           } else {
                console.warn("score.txt 파싱 오류: 유효하지 않은 Result 범위 형식입니다 ('-' 없음).", line);
                continue;
@@ -226,6 +232,7 @@
       for (let i = 1; i <= 5; i++) {
         const btn = document.createElement("button"); // 버튼 요소 생성
         btn.textContent = i; // 버튼 텍스트를 1, 2, 3, 4, 5로 설정
+        btn.classList.add('answer-button'); // CSS 스타일 적용을 위한 클래스 추가 (선택 사항)
         // 버튼 클릭 시 processAnswer 함수 호출
         // 현재 질문 번호(currentQuestion.number)와 선택된 값(i)을 인자로 넘김
         btn.addEventListener("click", function() {
@@ -240,10 +247,12 @@
       // 현재 질문 번호와 선택된 값(1-5)에 해당하는 점수 규칙 찾기
       // scoreRules 객체는 { "질문번호": { "척도값": 점수 } } 형태
       const rulesForQuestion = scoreRules[qNumber]; // 예: scoreRules["1"]
-      const scoreChange = rulesForQuestion ? rulesForQuestion[answerValue] : undefined; // 예: scoreRules["1"]["3"] 의 값
+      // answerValue는 숫자지만, scoreRules의 키는 문자열일 수 있으므로 문자열로 변환해서 찾음
+      const scoreChange = rulesForQuestion ? rulesForQuestion[String(answerValue)] : undefined; 
 
       // 해당 규칙이 존재하고 점수 변화량이 숫자인지 확인
-      if (scoreChange !== undefined && typeof scoreChange === 'number') {
+      // parseInt 결과는 숫자 또는 NaN (Not a Number) 일 수 있음. isNaN()으로 체크.
+      if (scoreChange !== undefined && !isNaN(scoreChange)) {
         totalScore += scoreChange; // 총점에 점수 변화량 더하기
         console.log(`Q${qNumber}에 ${answerValue} 선택, 점수 ${scoreChange} 추가. 현재 총점: ${totalScore}`); // 점수 변화 확인 로그
       } else {
@@ -258,15 +267,25 @@
     function displayResult() {
       let message = "결과를 찾을 수 없습니다. 점수 범위 규칙을 확인하세요."; // 기본 메시지 (score.txt 문제 가능성)
       
-      // 등록된 resultRules 배열을 순회하여, totalScore가 범위에 부합하는 메시지를 찾음
-      // resultRules 배열은 [{min, max, message}, ...] 형태
-      for (let rule of resultRules) {
-        // 총점(totalScore)이 현재 규칙의 최소(min)와 최대(max) 점수 범위 안에 있는지 확인
-        // 최소값 이상 (>= rule.min) 이고, 최대값 이하 (<= rule.max) 일 때 해당 범위
-        if (totalScore >= rule.min && totalScore <= rule.max) {
-          message = rule.message; // 해당 범위의 결과 메시지 선택
-          break; // 메시지를 찾았으면 반복 중단
-        }
+      // resultRules가 비어있는 경우 에러 메시지 업데이트
+      if (resultRules.length === 0) {
+           message = "결과 범위 규칙(Result)이 score.txt 파일에서 제대로 로드되지 않았습니다. score.txt 파일을 확인하세요.";
+           console.error("resultRules 배열이 비어있습니다. score.txt 파싱 오류 가능성.");
+      } else {
+           // 등록된 resultRules 배열을 순회하여, totalScore가 범위에 부합하는 메시지를 찾음
+           // resultRules 배열은 [{min, max, message}, ...] 형태
+           for (let rule of resultRules) {
+             // 총점(totalScore)이 현재 규칙의 최소(min)와 최대(max) 점수 범위 안에 있는지 확인
+             // 최소값 이상 (>= rule.min) 이고, 최대값 이하 (<= rule.max) 일 때 해당 범위
+             if (totalScore >= rule.min && totalScore <= rule.max) {
+               message = rule.message; // 해당 범위의 결과 메시지 선택
+               break; // 메시지를 찾았으면 반복 중단
+             }
+           }
+            // 총점이 어떤 범위에도 해당되지 않는 경우
+           if (message === "결과를 찾을 수 없습니다. 점수 범위 규칙을 확인하세요.") {
+               console.warn(`총점 ${totalScore}에 해당하는 결과 범위를 찾을 수 없습니다. score.txt 파일의 Result 범위를 확인하세요.`);
+           }
       }
       
       // 테스트 진행 영역 숨기고 결과 영역 보여주기
